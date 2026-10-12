@@ -165,3 +165,37 @@ def test_deferred_execution_error_preserves_latency_labels(spans, monkeypatch):
             path="/run_sse", func_result="", exception=None
         )
     assert histogram.record.call_args.args[1]["error_type"] == "HTTPException_404"
+
+
+@pytest.mark.parametrize(
+    "identity,expected",
+    [
+        ("agentkit/r-test-runtime", {"agentkit.runtime.id": "r-test-runtime"}),
+        ("", {}),
+        ("other/r-test-runtime", {}),
+        ("agentkit/", {}),
+        ("agentkit/r-test/runtime", {}),
+    ],
+)
+def test_request_runtime_identity_comes_from_deployment(
+    spans, monkeypatch, identity, expected
+):
+    monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", identity)
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    async def send(message):
+        pass
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/invoke",
+        "headers": [(b"agentkit-runtime-id", b"browser-chosen-runtime")],
+    }
+    asyncio.run(AgentkitTelemetryHTTPMiddleware(app)(scope, None, send))
+    request = spans.get_finished_spans()[0]
+    actual = {k: v for k, v in request.attributes.items() if k == "agentkit.runtime.id"}
+    assert actual == expected

@@ -1,6 +1,8 @@
 """Runtime 阶段计时，复用现有 OTel tracer 与上报通道。"""
 
 from contextlib import contextmanager
+import os
+import re
 
 from opentelemetry import trace
 
@@ -33,3 +35,15 @@ def mark_execution_error(error: BaseException, span: trace.Span) -> None:
         span.set_attribute("agentkit.error.status_code", code)
     span.set_status(trace.Status(trace.StatusCode.ERROR))
     span.add_event("agent.execution.failed")
+
+
+def runtime_attributes() -> dict[str, str]:
+    # 部署平台注入 agentkit/<Runtime ID>；只保留资源标识，不读取请求头。
+    # 该字段用于关联执行来源，不代替服务端的账号归属与写权限校验。
+    identity = os.getenv("MODEL_AGENT_CLIENT_REQ_ID", "")
+    if not identity.startswith("agentkit/"):
+        return {}
+    runtime_id = identity[len("agentkit/") :]
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", runtime_id):
+        return {}
+    return {"agentkit.runtime.id": runtime_id}

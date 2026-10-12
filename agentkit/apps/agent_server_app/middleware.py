@@ -18,6 +18,7 @@ from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from agentkit.apps.agent_server_app.diagnostics import runtime_attributes
 from agentkit.apps.agent_server_app.telemetry import telemetry
 from agentkit.apps.auth.inbound import redact_inbound_auth_headers
 
@@ -39,7 +40,10 @@ class AgentkitTelemetryHTTPMiddleware:
             {key.lower(): value for key, value in headers.items()}
         )
         span = telemetry.tracer.start_span(
-            name="agent_server_request", context=parent, kind=trace.SpanKind.SERVER
+            name="agent_server_request",
+            context=parent,
+            kind=trace.SpanKind.SERVER,
+            attributes=runtime_attributes(),
         )
         ctx = trace.set_span_in_context(span)
         token = context_api.attach(ctx)
