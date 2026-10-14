@@ -72,6 +72,10 @@ from agentkit.apps.agent_server_app.diagnostics import (
 from agentkit.apps.agent_server_app.middleware import (
     AgentkitTelemetryHTTPMiddleware,
 )
+from agentkit.apps.agent_server_app.non_streaming_diagnostics import (
+    install_non_streaming_diagnostics,
+    make_non_streaming_prepare,
+)
 from agentkit.apps.agent_server_app.credential_service import (
     AgentkitCredentialService,
 )
@@ -411,6 +415,10 @@ class AgentkitAgentServerApp(BaseAgentkitApp):
 
         if needs_cors_compat_middleware:
             add_cors_compat_middleware(self.app, resolved_allow_origins)
+
+        install_non_streaming_diagnostics(
+            self.app, DiagnosticRunAgentRequest, make_non_streaming_prepare(self)
+        )
 
         @self.app.post("/run_sse")
         async def run_agent_sse(
