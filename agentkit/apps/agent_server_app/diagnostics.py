@@ -3,10 +3,27 @@
 from contextlib import contextmanager
 import os
 import re
+from typing import Any
 
 from opentelemetry import trace
 
 from agentkit.apps.agent_server_app.telemetry import telemetry
+
+DIAGNOSTIC_RUN_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+
+
+def split_invoke_diagnostics(payload: Any) -> tuple[Any, str | None]:
+    if not isinstance(payload, dict):
+        return payload, None
+    # 诊断元数据不属于用户输入；复制后移除，保留旧版无 prompt 的 JSON 输入语义。
+    content = dict(payload)
+    run_id = content.pop("agentkitDiagnosticRunId", None)
+    if run_id is not None and (
+        not isinstance(run_id, str)
+        or re.fullmatch(DIAGNOSTIC_RUN_ID_PATTERN, run_id) is None
+    ):
+        raise ValueError("invalid diagnostic Run ID")
+    return content, run_id
 
 
 @contextmanager

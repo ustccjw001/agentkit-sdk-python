@@ -62,9 +62,11 @@ except ImportError:  # pragma: no cover - default migration path avoids veadk.
     VeadkRunner = None  # type: ignore[assignment]
 
 from agentkit.apps.agent_server_app.diagnostics import (
+    DIAGNOSTIC_RUN_ID_PATTERN,
     phase,
     mark_execution_event,
     mark_execution_error,
+    split_invoke_diagnostics,
 )
 
 from agentkit.apps.agent_server_app.middleware import (
@@ -106,7 +108,7 @@ class DiagnosticRunAgentRequest(RunAgentRequest):
     agentkit_diagnostic_run_id: str | None = Field(
         default=None,
         alias="agentkitDiagnosticRunId",
-        pattern=r"^[A-Za-z0-9_-]{1,64}$",
+        pattern=DIAGNOSTIC_RUN_ID_PATTERN,
     )
 
 
@@ -596,6 +598,18 @@ class AgentkitAgentServerApp(BaseAgentkitApp):
                 payload = await request.json()
             except Exception:
                 payload = None
+
+            try:
+                payload, diagnostic_run_id = split_invoke_diagnostics(payload)
+            except ValueError:
+                # 不回显错误值，且在会话创建与 Agent 执行前拒绝无效的关联标识。
+                error = HTTPException(
+                    status_code=400, detail="Invalid diagnostic Run ID"
+                )
+                mark_execution_error(error, request_span)
+                raise error
+            if diagnostic_run_id is not None:
+                request_span.set_attribute("agentkit.run.id", diagnostic_run_id)
 
             text = payload.get("prompt") if isinstance(payload, dict) else None
             if text is None:
