@@ -63,4 +63,10 @@ def runtime_attributes() -> dict[str, str]:
     runtime_id = identity[len("agentkit/") :]
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", runtime_id):
         return {}
-    return {"agentkit.runtime.id": runtime_id}
+    attributes = {"agentkit.runtime.id": runtime_id}
+    # 记录平台在本进程中注入的 Revision，避免查询时用当前配置回填历史执行。
+    # 它不是业务版本、版本类型或授权依据，也不接受请求头提供的版本。
+    revision = os.getenv("_FAAS_REVISION_NUMBER", "")
+    if re.fullmatch(r"(?:0|[1-9][0-9]{0,9})", revision) and int(revision) <= 2147483647:
+        attributes["faas.version"] = revision
+    return attributes

@@ -199,3 +199,48 @@ def test_request_runtime_identity_comes_from_deployment(
     request = spans.get_finished_spans()[0]
     actual = {k: v for k, v in request.attributes.items() if k == "agentkit.runtime.id"}
     assert actual == expected
+
+
+@pytest.mark.parametrize("revision", ["0", "4", "2147483647"])
+def test_request_records_process_revision_not_header(spans, monkeypatch, revision):
+    monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", "agentkit/r-test-runtime")
+    monkeypatch.setenv("_FAAS_REVISION_NUMBER", revision)
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    async def send(message):
+        pass
+
+    asyncio.run(
+        AgentkitTelemetryHTTPMiddleware(app)(
+            {
+                "type": "http", "method": "POST", "path": "/invoke",
+                "headers": [(b"x-faas-revision-number", b"browser-chosen-revision")],
+            },
+            None, send,
+        )
+    )
+    request = spans.get_finished_spans()[0]
+    assert request.attributes["agentkit.runtime.id"] == "r-test-runtime"
+    assert request.attributes["faas.version"] == revision
+
+
+@pytest.mark.parametrize(
+    "revision", ["", "-1", "04", " 4", "4 ", "4.0", "4\n", "2147483648", "x" * 160]
+)
+def test_invalid_process_revision_is_omitted(monkeypatch, revision):
+    from agentkit.apps.agent_server_app.diagnostics import runtime_attributes
+
+    monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", "agentkit/r-test-runtime")
+    monkeypatch.setenv("_FAAS_REVISION_NUMBER", revision)
+    assert runtime_attributes() == {"agentkit.runtime.id": "r-test-runtime"}
+
+
+def test_revision_does_not_invent_runtime_identity(monkeypatch):
+    from agentkit.apps.agent_server_app.diagnostics import runtime_attributes
+
+    monkeypatch.delenv("MODEL_AGENT_CLIENT_REQ_ID", raising=False)
+    monkeypatch.setenv("_FAAS_REVISION_NUMBER", "4")
+    assert runtime_attributes() == {}
