@@ -205,7 +205,7 @@ def test_create_runtime_accepts_exclusive_gateway():
     assert _FakeRuntimeClient.last_request.gateway_instance_id == "g-123"
 
 
-def test_create_runtime_rejects_exclusive_gateway_with_network_before_client_init():
+def test_create_runtime_accepts_exclusive_gateway_with_network():
     from agentkit.toolkit.cli.cli import app
 
     result = runner.invoke(
@@ -222,10 +222,14 @@ def test_create_runtime_rejects_exclusive_gateway_with_network_before_client_ini
         ),
     )
 
-    assert result.exit_code == 1
-    assert "runtime.network cannot be used" in result.output
-    assert _FakeRuntimeClient.instances == []
-    assert _FakeRuntimeClient.last_request is None
+    assert result.exit_code == 0
+    request = _FakeRuntimeClient.last_request
+    assert request.gateway_mode == "Exclusive"
+    assert request.gateway_instance_id == "g-123"
+    assert request.network_configuration is not None
+    assert request.network_configuration.enable_private_network is True
+    assert request.network_configuration.enable_public_network is True
+    assert request.network_configuration.vpc_configuration.vpc_id == "vpc-123"
 
 
 def test_update_runtime_rejects_gateway_fields_in_json():

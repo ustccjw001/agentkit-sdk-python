@@ -43,12 +43,11 @@ def test_validate_runtime_gateway_create_config():
             gateway_instance_id=None,
         )
 
-    with pytest.raises(ValueError, match="network cannot be used"):
-        validate_runtime_gateway_create_config(
-            gateway_mode="Exclusive",
-            gateway_instance_id="g-1",
-            has_network_configuration=True,
-        )
+    validate_runtime_gateway_create_config(
+        gateway_mode="Exclusive",
+        gateway_instance_id="g-1",
+        has_network_configuration=True,
+    )
 
     with pytest.raises(ValueError, match="only valid when gateway_mode is Exclusive"):
         validate_runtime_gateway_create_config(

@@ -47,6 +47,7 @@ def validate_runtime_gateway_create_config(
     has_network_configuration: bool = False,
     label: str = "runtime",
 ) -> None:
+    del has_network_configuration
     mode = (
         normalize_runtime_gateway_mode(gateway_mode, f"{label}.gateway_mode")
         or "Shared"
@@ -57,11 +58,6 @@ def validate_runtime_gateway_create_config(
         if not gateway_instance_id:
             raise ValueError(
                 f"{label}.gateway_instance_id is required when gateway_mode is Exclusive."
-            )
-        if has_network_configuration:
-            raise ValueError(
-                f"{label}.network cannot be used when gateway_mode is Exclusive; "
-                "the Runtime follows the selected gateway instance network."
             )
         return
 

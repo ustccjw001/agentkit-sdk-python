@@ -337,7 +337,7 @@ def test_create_new_runtime_passes_exclusive_gateway_settings(monkeypatch):
     assert result.metadata["runtime_gateway_instance_id"] == "g-123"
 
 
-def test_create_new_runtime_rejects_invalid_exclusive_gateway_settings(monkeypatch):
+def test_create_new_runtime_requires_instance_id_for_exclusive_gateway(monkeypatch):
     runner = VeAgentkitRuntimeRunner()
     client = _FakeRuntimeClient(
         create_response=runtime_types.CreateRuntimeResponse(RuntimeId="unused"),
@@ -350,16 +350,38 @@ def test_create_new_runtime_rejects_invalid_exclusive_gateway_settings(monkeypat
     assert result.success is False
     assert "gateway_instance_id is required" in result.error
 
+    assert client.create_calls == []
+
+
+def test_create_new_runtime_accepts_exclusive_gateway_with_network(monkeypatch):
+    runner = VeAgentkitRuntimeRunner()
+    client = _FakeRuntimeClient(
+        create_response=runtime_types.CreateRuntimeResponse(RuntimeId="rt-new"),
+        get_runtime_responses=[
+            _make_runtime(
+                runtime_id="rt-new",
+                status=RUNTIME_STATUS_READY,
+                gateway_mode="Exclusive",
+                gateway_instance_id="g-123",
+            )
+        ],
+    )
+    _install_client(monkeypatch, runner, client)
+
     with_network = _make_config(
         runtime_gateway_mode="Exclusive",
         runtime_gateway_instance_id="g-123",
         runtime_network={"mode": "public"},
     )
     result = runner._create_new_runtime(with_network)
-    assert result.success is False
-    assert "runtime.network cannot be used" in result.error
 
-    assert client.create_calls == []
+    assert result.success is True
+    req = client.create_calls[0]
+    assert req.gateway_mode == "Exclusive"
+    assert req.gateway_instance_id == "g-123"
+    assert req.network_configuration is not None
+    assert req.network_configuration.enable_public_network is True
+    assert req.network_configuration.enable_private_network is False
 
 
 def test_create_new_runtime_init_failure_downloads_logs_and_cleans_up_when_confirmed(
