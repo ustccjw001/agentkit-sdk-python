@@ -7,6 +7,7 @@ from typing import Any
 
 from opentelemetry import trace
 
+from agentkit.apps.agent_server_app.runtime_config import runtime_config_attributes
 from agentkit.apps.agent_server_app.telemetry import telemetry
 
 DIAGNOSTIC_RUN_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
@@ -54,7 +55,7 @@ def mark_execution_error(error: BaseException, span: trace.Span) -> None:
     span.add_event("agent.execution.failed")
 
 
-def runtime_attributes() -> dict[str, str]:
+def runtime_attributes() -> dict[str, str | int]:
     # 部署平台注入 agentkit/<Runtime ID>；只保留资源标识，不读取请求头。
     # 该字段用于关联执行来源，不代替服务端的账号归属与写权限校验。
     identity = os.getenv("MODEL_AGENT_CLIENT_REQ_ID", "")
@@ -63,7 +64,8 @@ def runtime_attributes() -> dict[str, str]:
     runtime_id = identity[len("agentkit/") :]
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", runtime_id):
         return {}
-    attributes = {"agentkit.runtime.id": runtime_id}
+    attributes: dict[str, str | int] = {"agentkit.runtime.id": runtime_id}
+    attributes.update(runtime_config_attributes())
     # 记录平台在本进程中注入的 Revision，避免查询时用当前配置回填历史执行。
     # 它不是业务版本、版本类型或授权依据，也不接受请求头提供的版本。
     revision = os.getenv("_FAAS_REVISION_NUMBER", "")
