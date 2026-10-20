@@ -204,6 +204,7 @@ def test_request_runtime_identity_comes_from_deployment(
 @pytest.mark.parametrize("revision", ["0", "4", "2147483647"])
 def test_request_records_process_revision_not_header(spans, monkeypatch, revision):
     monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", "agentkit/r-test-runtime")
+    monkeypatch.setenv("_FAAS_FUNC_ID", "function-test-id")
     monkeypatch.setenv("_FAAS_REVISION_NUMBER", revision)
 
     async def app(scope, receive, send):
@@ -216,15 +217,22 @@ def test_request_records_process_revision_not_header(spans, monkeypatch, revisio
     asyncio.run(
         AgentkitTelemetryHTTPMiddleware(app)(
             {
-                "type": "http", "method": "POST", "path": "/invoke",
-                "headers": [(b"x-faas-revision-number", b"browser-chosen-revision")],
+                "type": "http",
+                "method": "POST",
+                "path": "/invoke",
+                "headers": [
+                    (b"x-faas-revision-number", b"browser-chosen-revision"),
+                    (b"x-faas-func-id", b"browser-chosen-function"),
+                ],
             },
-            None, send,
+            None,
+            send,
         )
     )
     request = spans.get_finished_spans()[0]
     assert request.attributes["agentkit.runtime.id"] == "r-test-runtime"
     assert request.attributes["faas.version"] == revision
+    assert request.attributes["agentkit.runtime.function.id"] == "function-test-id"
 
 
 @pytest.mark.parametrize(

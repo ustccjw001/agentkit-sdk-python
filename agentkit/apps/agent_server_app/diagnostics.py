@@ -66,6 +66,11 @@ def runtime_attributes() -> dict[str, str | int]:
         return {}
     attributes: dict[str, str | int] = {"agentkit.runtime.id": runtime_id}
     attributes.update(runtime_config_attributes())
+    # 同一 Revision 可出现在不同物理函数中；保留平台函数标识以便核对历史快照。
+    # 它是资源关联字段，不是业务版本，也不接受浏览器自报的函数身份。
+    function_id = os.getenv("_FAAS_FUNC_ID", "")
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", function_id):
+        attributes["agentkit.runtime.function.id"] = function_id
     # 记录平台在本进程中注入的 Revision，避免查询时用当前配置回填历史执行。
     # 它不是业务版本、版本类型或授权依据，也不接受请求头提供的版本。
     revision = os.getenv("_FAAS_REVISION_NUMBER", "")

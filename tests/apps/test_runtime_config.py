@@ -97,3 +97,23 @@ def test_config_cannot_create_runtime_identity(monkeypatch):
         "AGENTKIT_RUNTIME_DIAGNOSTIC_CONFIG", '{"schema_version":1,"cpu_milli":2000}'
     )
     assert runtime_attributes() == {}
+
+
+@pytest.mark.parametrize(
+    "function_id", ["function-a", "vefaas-cn-beijing-test_02", "func.0:1"]
+)
+def test_native_function_id_is_recorded_with_runtime_identity(monkeypatch, function_id):
+    monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", "agentkit/r-test")
+    monkeypatch.setenv("_FAAS_FUNC_ID", function_id)
+    assert runtime_attributes()["agentkit.runtime.function.id"] == function_id
+    monkeypatch.delenv("MODEL_AGENT_CLIENT_REQ_ID")
+    assert runtime_attributes() == {}
+
+
+@pytest.mark.parametrize(
+    "function_id", ["", " bad", "bad ", "bad\n", "a/b", "https://x", "_bad", "a" * 129]
+)
+def test_invalid_native_function_id_is_omitted(monkeypatch, function_id):
+    monkeypatch.setenv("MODEL_AGENT_CLIENT_REQ_ID", "agentkit/r-test")
+    monkeypatch.setenv("_FAAS_FUNC_ID", function_id)
+    assert "agentkit.runtime.function.id" not in runtime_attributes()
