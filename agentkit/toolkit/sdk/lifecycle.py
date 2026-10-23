@@ -20,6 +20,10 @@ from ..executors import LifecycleExecutor
 from ..reporter import SilentReporter, Reporter
 from ..models import LifecycleResult, PreflightMode
 from ..context import ExecutionContext
+from ..runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    normalize_runtime_recreate_policy,
+)
 
 
 def launch(
@@ -27,6 +31,7 @@ def launch(
     config_dict: Optional[Dict[str, Any]] = None,
     platform: str = "auto",
     preflight_mode: PreflightMode = PreflightMode.WARN,
+    runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     reporter: Optional[Reporter] = None,
 ) -> LifecycleResult:
     """
@@ -44,6 +49,7 @@ def launch(
             (e.g., "linux/amd64", "linux/arm64", or "auto"). This controls
             the Docker build target platform and is independent from the
             launch_type (local/cloud/hybrid) configured in agentkit.yaml.
+        runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
     Returns:
         LifecycleResult: Launch operation result containing:
@@ -86,12 +92,16 @@ def launch(
         reporter = SilentReporter()
     ExecutionContext.set_reporter(reporter)
 
+    runtime_recreate_policy = normalize_runtime_recreate_policy(
+        runtime_recreate_policy
+    )
     executor = LifecycleExecutor(reporter=reporter)
     return executor.launch(
         config_dict=config_dict,
         config_file=config_file,
         platform=platform,
         preflight_mode=preflight_mode,
+        runtime_recreate_policy=runtime_recreate_policy,
     )
 
 

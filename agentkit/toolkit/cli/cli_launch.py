@@ -31,6 +31,14 @@ def launch_command(
         "--preflight-mode",
         help="Preflight behavior: prompt|fail|warn|skip",
     ),
+    recreate_runtime: str = typer.Option(
+        "",
+        "--recreate-runtime",
+        help=(
+            "Whether to delete and recreate the Runtime when recovery needs "
+            "replacement (default: ask, No). Allowed: yes|no."
+        ),
+    ),
 ):
     """Build and deploy in one command."""
     from agentkit.toolkit.executors import LifecycleExecutor
@@ -38,6 +46,9 @@ def launch_command(
     from agentkit.toolkit.context import ExecutionContext
     from agentkit.toolkit.models import PreflightMode
     from agentkit.toolkit.config.global_config import get_global_config
+    from agentkit.toolkit.runtime_recreate_policy import (
+        parse_runtime_recreate_policy,
+    )
 
     console.print("[green]Launching agent...[/green]")
 
@@ -80,11 +91,18 @@ def launch_command(
         except Exception:
             pass
 
+    try:
+        runtime_recreate_policy = parse_runtime_recreate_policy(recreate_runtime)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+
     executor = LifecycleExecutor(reporter=reporter)
     result = executor.launch(
         config_file=str(config_file),
         platform=platform,
         preflight_mode=resolved_mode,
+        runtime_recreate_policy=runtime_recreate_policy,
     )
 
     # Format output

@@ -9,14 +9,15 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import requests
 from google.adk.events import Event
 from google.adk.plugins import BasePlugin
 from google.genai import types
-from volcengine.Credentials import Credentials as SigningCredentials
 from volcengine.auth.SignerV4 import SignerV4
 from volcengine.base.Request import Request as SigningRequest
+from volcengine.Credentials import Credentials as SigningCredentials
 
 from agentkit.platform.configuration import VolcConfiguration
 from agentkit.utils.http_defaults import http_timeout
@@ -36,6 +37,7 @@ _API_VERSION = "2025-08-31"
 _DEFAULT_REGION = "cn-beijing"
 _SERVICE = "llmshield"
 _PATH = "/v2/moderate"
+SENTRY_V3_PATH = "/OpenTOP/V3/Lumen/Moderate"
 _INVOCATION_STATE_KEY = "__agentkit_llm_shield__"
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
@@ -56,7 +58,9 @@ class LLMShieldPlugin(BasePlugin):
     """Moderate AgentKit text boundaries with Volcengine LLM Shield.
 
     Applications opt in by attaching the plugin to the ADK ``App.plugins``
-    boundary; :meth:`from_env` reads the migration runtime environment, where a
+    boundary. Private AgentSentry uses AGENTSENTRY_URL and endpoint credentials;
+    AGENTSENTRY_ENABLED=false disables it independently of public LLM Shield.
+    :meth:`from_env` reads the migration runtime environment, where a
     configured ``TOOL_LLM_SHIELD_APP_ID`` enables moderation and
     ``ENABLE_LLM_SHIELD`` only overrides that default. Existing AgentKit
     applications are unchanged until they construct this plugin.
@@ -67,13 +71,26 @@ class LLMShieldPlugin(BasePlugin):
     def __init__(
         self,
         *,
-        app_id: str,
+        app_id: str = "",
         region: str = _DEFAULT_REGION,
         timeout: float | None = None,
         base_url: str | None = None,
         max_output_bytes: int = 256 * 1024,
+        agentsentry_url: str | None = None,
     ) -> None:
         super().__init__(name="LLMShieldPlugin")
+        if agentsentry_url is not None:
+            from agentkit.plugins.agentsentry_v3 import AgentSentryV3
+
+            self.timeout = timeout if timeout is not None else http_timeout()
+            self._sentry_v3 = AgentSentryV3.from_env(agentsentry_url, self.timeout)
+            self.base_url = self._sentry_v3.url
+            self.region = self._sentry_v3.region
+            self.app_id = ""
+            self.account_id = self._sentry_v3.account_id
+            self.max_output_bytes = max_output_bytes
+            self._configuration = None
+            return
         if not app_id.strip():
             raise ValueError("LLM Shield app_id must not be empty")
         if not region.strip():
@@ -87,12 +104,21 @@ class LLMShieldPlugin(BasePlugin):
         self.base_url = (
             base_url or f"https://{self.region}.sdk.access.llm-shield.omini-shield.com"
         ).rstrip("/")
+        self._sentry_v3 = None
+        if urlsplit(self.base_url).path.rstrip("/") == SENTRY_V3_PATH:
+            raise ValueError("Configure V3 with agentsentry_url or AGENTSENTRY_URL")
         self.max_output_bytes = max_output_bytes
         self._configuration = VolcConfiguration(region=self.region)
 
     @classmethod
     def from_env(cls) -> LLMShieldPlugin | None:
         """Build the plugin from the migration runtime environment.
+
+        AGENTSENTRY_URL selects private V3 with AGENTSENTRY_ACCOUNT_ID,
+        AGENTSENTRY_INSTANCE_ID and endpoint AGENTSENTRY_AK/SK credentials.
+        AGENTSENTRY_REGION defaults to cn-private. AGENTSENTRY_ENABLED=false
+        disables private moderation independently of ENABLE_LLM_SHIELD.
+        V3 reviews current user text and visible tool plans.
 
         A configured ``TOOL_LLM_SHIELD_APP_ID`` is the enablement signal, so
         migrations do not need a separate switch. ``ENABLE_LLM_SHIELD`` is an
@@ -102,6 +128,19 @@ class LLMShieldPlugin(BasePlugin):
         request authentication uses AgentKit's AK/SK, STS, or Runtime IAM
         credential chain.
         """
+
+        sentry_url = os.getenv("AGENTSENTRY_URL", "").strip()
+        if sentry_url:
+            from agentkit.plugins.agentsentry_v3 import enabled_from_env
+
+            return cls(agentsentry_url=sentry_url) if enabled_from_env() else None
+        if (
+            urlsplit(os.getenv("TOOL_LLM_SHIELD_URL", "")).path.rstrip("/")
+            == SENTRY_V3_PATH
+        ):
+            raise ValueError(
+                "Configure V3 with AGENTSENTRY_URL, not TOOL_LLM_SHIELD_URL"
+            )
 
         raw_override = os.getenv("ENABLE_LLM_SHIELD", "").strip().lower()
         app_id = os.getenv("TOOL_LLM_SHIELD_APP_ID", "").strip()
@@ -135,10 +174,28 @@ class LLMShieldPlugin(BasePlugin):
         )
 
     async def moderate_text(
-        self, text: str, *, role: Literal["user", "assistant"]
+        self,
+        text: str,
+        *,
+        role: Literal["user", "assistant"],
+        hook_name: str | None = None,
+        session_info: dict[str, str] | None = None,
     ) -> str | None:
         """Return replacement text when content must not pass unchanged."""
 
+        if self._sentry_v3:
+            if hook_name is None:
+                if role == "assistant":
+                    return None
+                if role == "user":
+                    hook_name = "before_dispatch"
+            return await asyncio.to_thread(
+                self._sentry_v3.moderate,
+                text,
+                role=role,
+                hook_name=hook_name,
+                session_info=session_info,
+            )
         if not text:
             return None
         if role not in {"user", "assistant"}:
@@ -240,13 +297,62 @@ class LLMShieldPlugin(BasePlugin):
         request.headers.update({"X-Top-Service": _SERVICE, "X-Top-Region": self.region})
         return dict(request.headers)
 
+    async def _moderate_boundary(self, text, *, role, hook_name, context):
+        if not self._sentry_v3:
+            return await self.moderate_text(text, role=role)
+        session = getattr(context, "session", None)
+        return await self.moderate_text(
+            text,
+            role=role,
+            hook_name=hook_name,
+            session_info={
+                "SessionID": getattr(session, "id", "") or "",
+                "RunID": getattr(context, "invocation_id", "") or "",
+            },
+        )
+
     async def before_run_callback(self, *, invocation_context) -> types.Content | None:
-        text = _content_text(getattr(invocation_context, "user_content", None))
-        replacement = await self.moderate_text(text, role="user")
+        text = _content_text(
+            getattr(invocation_context, "user_content", None),
+            visible_only=bool(self._sentry_v3),
+        )
+        replacement = await self._moderate_boundary(
+            text, role="user", hook_name="before_dispatch", context=invocation_context
+        )
         if replacement is None:
             return None
         _invocation_state(invocation_context)["terminal"] = True
         return _model_content(replacement)
+
+    async def before_model_callback(self, *, callback_context, llm_request):
+        if self._sentry_v3:
+            invocation = getattr(
+                callback_context, "_invocation_context", callback_context
+            )
+            state = _invocation_state(invocation)
+            state.pop("plans", None)
+            state.pop("partial_plan", None)
+        return None
+
+    async def after_model_callback(self, *, callback_context, llm_response):
+        """Retain visible native ADK tool plans without inspecting final replies."""
+        if not self._sentry_v3:
+            return None
+        invocation = getattr(callback_context, "_invocation_context", callback_context)
+        state = _invocation_state(invocation)
+        content = getattr(llm_response, "content", None)
+        text = _content_text(content, visible_only=True)
+        if getattr(llm_response, "partial", False):
+            state["partial_plan"] = state.get("partial_plan", "") + text
+        else:
+            text = text or state.pop("partial_plan", "")
+        for part in getattr(content, "parts", None) or []:
+            call = getattr(part, "function_call", None)
+            if call:
+                state.setdefault("plans", {})[
+                    _native_call_key(call.name, call.args or {})
+                ] = text or state.get("partial_plan", "")
+        return None
 
     async def before_tool_callback(
         self,
@@ -255,6 +361,40 @@ class LLMShieldPlugin(BasePlugin):
         tool_args: dict[str, Any],
         tool_context: Any,
     ) -> dict[str, Any] | None:
+        if self._sentry_v3:
+            from agentkit.plugins.agentsentry_v3 import MISSING_PLAN
+
+            invocation = getattr(tool_context, "_invocation_context", tool_context)
+            key = _native_call_key(tool.name, tool_args)
+            plan = _invocation_state(invocation).get("plans", {}).pop(key, "")
+            if not plan:
+                return {
+                    "result": MISSING_PLAN,
+                    "reason": "missing_visible_execution_plan",
+                }
+            block = await asyncio.to_thread(
+                self._sentry_v3.moderate,
+                plan,
+                role="assistant",
+                hook_name="before_tool_call",
+                session_info={
+                    "SessionID": getattr(
+                        getattr(invocation, "session", None), "id", ""
+                    ),
+                    "RunID": getattr(invocation, "invocation_id", ""),
+                },
+                tool_calls=[
+                    {
+                        "ID": getattr(tool_context, "function_call_id", "") or "",
+                        "Type": "function",
+                        "Function": {
+                            "Name": tool.name,
+                            "Arguments": json.dumps(tool_args, ensure_ascii=False),
+                        },
+                    }
+                ],
+            )
+            return {"result": block} if block else None
         del tool, tool_context
         text = _tool_payload_text(tool_args)
         if text is None:
@@ -270,6 +410,8 @@ class LLMShieldPlugin(BasePlugin):
         tool_context: Any,
         result: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if self._sentry_v3:
+            return None
         del tool, tool_args, tool_context
         text = _tool_payload_text(result)
         if text is None:
@@ -280,6 +422,8 @@ class LLMShieldPlugin(BasePlugin):
     async def on_event_callback(
         self, *, invocation_context, event: Event
     ) -> Event | None:
+        if self._sentry_v3:
+            return event
         state = _invocation_state(invocation_context)
         if state.get("terminal"):
             return event
@@ -328,11 +472,16 @@ def _invocation_state(invocation_context: Any) -> dict[str, Any]:
     return state
 
 
-def _content_text(content: Any) -> str:
+def _content_text(content: Any, *, visible_only: bool = False) -> str:
     if content is None:
         return ""
     parts = getattr(content, "parts", None) or []
-    texts = [str(part.text) for part in parts if getattr(part, "text", None)]
+    texts = [
+        str(part.text)
+        for part in parts
+        if getattr(part, "text", None)
+        and (not visible_only or not getattr(part, "thought", False))
+    ]
     return "\n".join(texts)
 
 
@@ -390,3 +539,7 @@ def _replace_event_text(event: Event, text: str) -> Event:
         parts.insert(0, types.Part(text=text))
     updated.content = content.model_copy(update={"parts": parts})
     return updated
+
+
+def _native_call_key(name, args):
+    return name, json.dumps(args, sort_keys=True, ensure_ascii=False)

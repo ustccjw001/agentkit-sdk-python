@@ -360,6 +360,7 @@ class CloudStrategy(Strategy):
             runtime_apikey_name=strategy_config.runtime_apikey_name,
             runtime_endpoint=strategy_config.runtime_endpoint,
             runtime_envs=merged_envs,
+            runtime_recreate_policy=self.runtime_recreate_policy,
             runtime_bindings=getattr(strategy_config, "runtime_bindings", None) or {},
             runtime_network=getattr(strategy_config, "runtime_network", None) or {},
             runtime_gateway_mode=getattr(strategy_config, "runtime_gateway_mode", ""),

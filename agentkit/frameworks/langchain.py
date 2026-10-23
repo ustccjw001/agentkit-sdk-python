@@ -27,6 +27,9 @@ except ImportError:  # pragma: no cover - depends on optional packages.
     HumanMessage = None  # type: ignore[assignment]
 
 
+from agentkit.frameworks._agentsentry import guarded_config, protect_migrated_tools
+
+
 class LangChainAgentkitBridge(BaseAgent):
     """Adapt a LangChain Runnable or callable to AgentKit's ADK runtime boundary."""
 
@@ -59,7 +62,7 @@ class LangChainAgentkitBridge(BaseAgent):
             last_error: Exception | None = None
             for candidate in candidates:
                 try:
-                    return await ainvoke(candidate)
+                    return await ainvoke(candidate, **self._security_kwargs())
                 except Exception as exc:
                     if not is_input_shape_error(exc):
                         raise
@@ -72,7 +75,7 @@ class LangChainAgentkitBridge(BaseAgent):
             last_error = None
             for candidate in candidates:
                 try:
-                    return invoke(candidate)
+                    return invoke(candidate, **self._security_kwargs())
                 except Exception as exc:
                     if not is_input_shape_error(exc):
                         raise
@@ -81,6 +84,10 @@ class LangChainAgentkitBridge(BaseAgent):
                 raise last_error
 
         if callable(self._runnable):
+            if self._security_kwargs():
+                raise UnsupportedFrameworkAgentError(
+                    "AgentSentry tool protection requires a Runnable accepting config callbacks"
+                )
             last_error = None
             for candidate in candidates:
                 try:
@@ -104,7 +111,7 @@ class LangChainAgentkitBridge(BaseAgent):
             for candidate in self._input_candidates(payload, text_input):
                 emitted = False
                 try:
-                    async for chunk in astream(candidate):
+                    async for chunk in astream(candidate, **self._security_kwargs()):
                         emitted = True
                         yield chunk
                     return
@@ -124,7 +131,7 @@ class LangChainAgentkitBridge(BaseAgent):
             for candidate in self._input_candidates(payload, text_input):
                 emitted = False
                 try:
-                    for chunk in stream(candidate):
+                    for chunk in stream(candidate, **self._security_kwargs()):
                         emitted = True
                         yield chunk
                     return
@@ -137,6 +144,12 @@ class LangChainAgentkitBridge(BaseAgent):
             if last_error is not None:
                 raise last_error
 
+    @staticmethod
+    def _security_kwargs():
+        config = guarded_config()
+        return {"config": config} if config is not None else {}
+
+    @protect_migrated_tools
     async def _run_async_impl(
         self,
         ctx: InvocationContext,

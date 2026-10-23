@@ -20,12 +20,17 @@ from ..executors import DeployExecutor
 from ..models import DeployResult, PreflightMode
 from ..reporter import SilentReporter, Reporter
 from ..context import ExecutionContext
+from ..runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    normalize_runtime_recreate_policy,
+)
 
 
 def deploy(
     config_file: Optional[str] = None,
     config_dict: Optional[Dict[str, Any]] = None,
     preflight_mode: PreflightMode = PreflightMode.WARN,
+    runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     reporter: Optional[Reporter] = None,
 ) -> DeployResult:
     """
@@ -49,6 +54,7 @@ def deploy(
         reporter: Optional Reporter for progress/log output. If None, uses
             SilentReporter (no console output). Advanced users can pass
             LoggingReporter or a custom Reporter implementation.
+        runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
     Returns:
         DeployResult: Deploy operation result containing:
@@ -81,9 +87,13 @@ def deploy(
         reporter = SilentReporter()
     ExecutionContext.set_reporter(reporter)
 
+    runtime_recreate_policy = normalize_runtime_recreate_policy(
+        runtime_recreate_policy
+    )
     executor = DeployExecutor(reporter=reporter)
     return executor.execute(
         config_dict=config_dict,
         config_file=config_file,
         preflight_mode=preflight_mode,
+        runtime_recreate_policy=runtime_recreate_policy,
     )

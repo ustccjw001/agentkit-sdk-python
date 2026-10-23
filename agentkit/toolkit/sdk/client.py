@@ -36,6 +36,10 @@ from ..models import (
     PreflightMode,
 )
 from ..reporter import Reporter
+from ..runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    normalize_runtime_recreate_policy,
+)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -241,6 +245,7 @@ class AgentKitClient:
         self,
         config_overrides: Optional[Dict[str, Any]] = None,
         preflight_mode: PreflightMode = PreflightMode.WARN,
+        runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     ) -> DeployResult:
         """
         Deploy agent using client configuration.
@@ -251,6 +256,7 @@ class AgentKitClient:
             preflight_mode: Preflight check behavior for required cloud services when
                 using cloud or hybrid launch types. Options are the same as
                 agentkit.toolkit.models.PreflightMode. SDK default is WARN.
+            runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
         Returns:
             DeployResult: Deploy operation result.
@@ -266,11 +272,15 @@ class AgentKitClient:
             ...     config_overrides={"cloud": {"runtime_name": "prod-v2"}}
             ... )
         """
+        resolved_runtime_recreate_policy = normalize_runtime_recreate_policy(
+            runtime_recreate_policy
+        )
         merged_config = self._merge_config(config_overrides)
         return _deploy(
             config_file=self.config_file,
             config_dict=merged_config,
             preflight_mode=preflight_mode,
+            runtime_recreate_policy=resolved_runtime_recreate_policy,
             reporter=self.reporter,
         )
 
@@ -356,6 +366,7 @@ class AgentKitClient:
         platform: str = "auto",
         config_overrides: Optional[Dict[str, Any]] = None,
         preflight_mode: PreflightMode = PreflightMode.WARN,
+        runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     ) -> LifecycleResult:
         """
         Launch agent (build + deploy) using client configuration.
@@ -369,6 +380,7 @@ class AgentKitClient:
             preflight_mode: Preflight check behavior for required cloud services when
                 using cloud or hybrid launch types. Options are the same as
                 agentkit.toolkit.models.PreflightMode. SDK default is WARN.
+            runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
         Returns:
             LifecycleResult: Launch operation result.
@@ -381,12 +393,16 @@ class AgentKitClient:
             >>> if result.success:
             ...     print(f"Agent launched successfully")
         """
+        resolved_runtime_recreate_policy = normalize_runtime_recreate_policy(
+            runtime_recreate_policy
+        )
         merged_config = self._merge_config(config_overrides)
         return _launch(
             config_file=self.config_file,
             config_dict=merged_config,
             platform=platform,
             preflight_mode=preflight_mode,
+            runtime_recreate_policy=resolved_runtime_recreate_policy,
             reporter=self.reporter,
         )
 

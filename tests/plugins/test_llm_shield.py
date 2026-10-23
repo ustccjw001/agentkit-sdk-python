@@ -41,10 +41,13 @@ def _decision(value: int) -> dict:
 @pytest.fixture(autouse=True)
 def _clean_llm_shield_env(monkeypatch):
     for name in (
+        "AGENTSENTRY_URL",
         "ENABLE_LLM_SHIELD",
         "TOOL_LLM_SHIELD_APP_ID",
         "TOOL_LLM_SHIELD_API_KEY",
         "TOOL_LLM_SHIELD_REGION",
+        "TOOL_LLM_SHIELD_URL",
+        "TOOL_LLM_SHIELD_ACCOUNT_ID",
     ):
         monkeypatch.delenv(name, raising=False)
 

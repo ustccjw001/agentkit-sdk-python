@@ -28,6 +28,10 @@ from .deploy_executor import DeployExecutor
 from .status_executor import StatusExecutor
 from agentkit.toolkit.models import LifecycleResult, PreflightMode, PreflightResult
 from agentkit.toolkit.reporter import Reporter
+from agentkit.toolkit.runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    normalize_runtime_recreate_policy,
+)
 
 
 class LifecycleExecutor(BaseExecutor):
@@ -124,6 +128,7 @@ class LifecycleExecutor(BaseExecutor):
         config_file: Optional[Union[str, Path]] = None,
         platform: str = "auto",
         preflight_mode: PreflightMode = PreflightMode.PROMPT,
+        runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     ) -> LifecycleResult:
         """
         Launch an Agent service (build + deploy in one step).
@@ -141,6 +146,7 @@ class LifecycleExecutor(BaseExecutor):
                 the Docker build target platform and is independent from the
                 launch_type (local/cloud/hybrid) configured in agentkit.yaml.
             preflight_mode: How to handle missing cloud services (default: PROMPT)
+            runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
         Returns:
             LifecycleResult: Contains build_result and deploy_result with endpoint information
@@ -151,6 +157,9 @@ class LifecycleExecutor(BaseExecutor):
         """
         token = None
         try:
+            runtime_recreate_policy = normalize_runtime_recreate_policy(
+                runtime_recreate_policy
+            )
             self.reporter.info("🚀 Starting launch operation...")
 
             # Preflight check: verify required cloud services for both build and deploy
@@ -206,6 +215,7 @@ class LifecycleExecutor(BaseExecutor):
                 config_dict=config_dict,
                 config_file=config_file,
                 preflight_mode=PreflightMode.SKIP,
+                runtime_recreate_policy=runtime_recreate_policy,
             )
 
             if not deploy_result.success:

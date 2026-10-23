@@ -23,6 +23,7 @@ from agentkit.toolkit.models import (
 )
 from agentkit.toolkit.reporter import Reporter, SilentReporter
 from agentkit.toolkit.config import CommonConfig
+from agentkit.toolkit.runtime_recreate_policy import RuntimeRecreatePolicy
 
 
 class Strategy(ABC):
@@ -78,6 +79,7 @@ class Strategy(ABC):
         self.config_manager = config_manager
         # Default to SilentReporter for programmatic usage (SDK scenarios)
         self.reporter = reporter or SilentReporter()
+        self.runtime_recreate_policy: RuntimeRecreatePolicy = "prompt"
 
     @abstractmethod
     def build(self, common_config: CommonConfig, strategy_config: Any) -> BuildResult:

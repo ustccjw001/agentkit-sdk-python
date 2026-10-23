@@ -20,16 +20,15 @@ import agentkit.sdk.runtime.types as runtime_types
 from agentkit.toolkit.config import CommonConfig
 from agentkit.toolkit.errors import ErrorCode
 from agentkit.toolkit.runners.ve_agentkit import (
-    VeAgentkitRuntimeRunner,
-    VeAgentkitRunnerConfig,
-    RUNTIME_STATUS_READY,
-    RUNTIME_STATUS_ERROR,
-    RUNTIME_STATUS_UNRELEASED,
     ARTIFACT_TYPE_DOCKER_IMAGE,
-    AUTH_TYPE_KEY_AUTH,
     AUTH_TYPE_CUSTOM_JWT,
+    AUTH_TYPE_KEY_AUTH,
+    RUNTIME_STATUS_ERROR,
+    RUNTIME_STATUS_READY,
+    RUNTIME_STATUS_UNRELEASED,
+    VeAgentkitRunnerConfig,
+    VeAgentkitRuntimeRunner,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -137,6 +136,7 @@ class _RecordingReporter:
         self.confirm_calls = []
         self.show_logs_calls = []
         self.long_task_descriptions = []
+        self.warning_messages = []
 
     def info(self, message, **kwargs):
         pass
@@ -145,7 +145,7 @@ class _RecordingReporter:
         pass
 
     def warning(self, message, **kwargs):
-        pass
+        self.warning_messages.append(message)
 
     def error(self, message, **kwargs):
         pass
@@ -458,6 +458,37 @@ def test_create_new_runtime_init_failure_skips_cleanup_when_declined(monkeypatch
     assert reporter.show_logs_calls == []
 
 
+def test_runtime_recreate_gate_never_preserves_existing_runtime():
+    reporter = _RecordingReporter()
+    runner = VeAgentkitRuntimeRunner(reporter=reporter)
+    cfg = _make_config(
+        runtime_id="rt-stable",
+        runtime_recreate_policy="never",
+    )
+
+    assert runner._allow_runtime_recreate(cfg, "needs replacement") is False
+    assert reporter.confirm_calls == []
+    assert reporter.warning_messages == [
+        (
+            "Runtime rt-stable needs replacement; delete/recreate was not "
+            "confirmed, so the existing Runtime was preserved."
+        )
+    ]
+
+
+def test_runtime_recreate_gate_always_allows_without_prompt():
+    reporter = _RecordingReporter()
+    runner = VeAgentkitRuntimeRunner(reporter=reporter)
+    cfg = _make_config(
+        runtime_id="rt-replace",
+        runtime_recreate_policy="always",
+    )
+
+    assert runner._allow_runtime_recreate(cfg, "needs replacement") is True
+    assert reporter.confirm_calls == []
+    assert reporter.warning_messages == []
+
+
 def test_create_new_runtime_exception_maps_to_runtime_create_failed(monkeypatch):
     runner = VeAgentkitRuntimeRunner()
 
@@ -519,6 +550,7 @@ def test_wait_for_status_polls_until_target_reached(monkeypatch):
     )
 
     assert ok is True
+    assert err is None
     assert runtime.status == RUNTIME_STATUS_READY
     assert len(client.get_calls) == 3
 
@@ -580,6 +612,7 @@ def test_wait_for_status_multiple_accepts_any_target(monkeypatch):
     )
 
     assert ok is True
+    assert err is None
     assert runtime.status == RUNTIME_STATUS_UNRELEASED
 
 
@@ -605,7 +638,9 @@ def test_update_existing_runtime_not_found_returns_resource_not_found(monkeypatc
     assert client.update_calls == []
 
 
-def test_update_existing_runtime_wrong_artifact_type_returns_config_invalid(monkeypatch):
+def test_update_existing_runtime_wrong_artifact_type_returns_config_invalid(
+    monkeypatch,
+):
     runner = VeAgentkitRuntimeRunner()
     # artifact_type is not the docker image type -> CONFIG_INVALID guard.
     existing = _make_runtime(runtime_id="r-code", artifact_type="code")
@@ -639,14 +674,14 @@ def test_update_existing_runtime_direct_to_ready_submits_update_and_skips_releas
     monkeypatch,
 ):
     runner = VeAgentkitRuntimeRunner()
-    existing = _make_runtime(runtime_id="r-up", status=RUNTIME_STATUS_READY, name="orig-name")
+    existing = _make_runtime(
+        runtime_id="r-up", status=RUNTIME_STATUS_READY, name="orig-name"
+    )
     # get_runtime is called: once for the initial fetch, then by the wait loop.
     ready_after_update = _make_runtime(
         runtime_id="r-up", status=RUNTIME_STATUS_READY, api_key="k-updated"
     )
-    client = _FakeRuntimeClient(
-        get_runtime_responses=[existing, ready_after_update]
-    )
+    client = _FakeRuntimeClient(get_runtime_responses=[existing, ready_after_update])
     _install_client(monkeypatch, runner, client)
 
     cfg = _make_config(
@@ -706,8 +741,55 @@ def test_update_existing_runtime_rejects_gateway_binding_change(monkeypatch):
 
     assert result.success is False
     assert result.error_code == ErrorCode.CONFIG_INVALID
-    assert "cannot be changed after creation" in result.error
+    assert "gateway settings can only be applied when a Runtime is created" in (
+        result.error
+    )
+    assert "existing Runtime was preserved" in result.error
+    assert "gateway_mode" not in result.error
+    assert "gateway_instance_id" not in result.error
     assert client.update_calls == []
+    assert client.delete_calls == []
+
+
+def test_update_existing_runtime_recreates_on_gateway_change_when_allowed(monkeypatch):
+    runner = VeAgentkitRuntimeRunner()
+    existing = _make_runtime(
+        runtime_id="r-old",
+        status=RUNTIME_STATUS_READY,
+        gateway_mode="Shared",
+    )
+    recreated_ready = _make_runtime(
+        runtime_id="r-new",
+        status=RUNTIME_STATUS_READY,
+        gateway_mode="Exclusive",
+        gateway_instance_id="g-123",
+        api_key="k-new",
+    )
+    client = _FakeRuntimeClient(
+        create_response=runtime_types.CreateRuntimeResponse(RuntimeId="r-new"),
+        get_runtime_responses=[existing, recreated_ready],
+    )
+    _install_client(monkeypatch, runner, client)
+
+    cfg = _make_config(
+        runtime_id="r-old",
+        runtime_gateway_mode="Exclusive",
+        runtime_gateway_instance_id="g-123",
+        runtime_recreate_policy="always",
+    )
+    result = runner._update_existing_runtime(cfg)
+
+    assert result.success is True
+    assert client.update_calls == []
+    assert len(client.delete_calls) == 1
+    assert client.delete_calls[0].runtime_id == "r-old"
+    assert len(client.create_calls) == 1
+    create_req = client.create_calls[0]
+    assert create_req.gateway_mode == "Exclusive"
+    assert create_req.gateway_instance_id == "g-123"
+    assert result.service_id == "r-new"
+    assert result.metadata["runtime_id"] == "r-new"
+    assert cfg.runtime_id == "r-new"
 
 
 def test_update_existing_runtime_unreleased_triggers_release_then_ready(monkeypatch):
@@ -754,7 +836,9 @@ def test_update_existing_runtime_update_wait_error_returns_deploy_failed(monkeyp
     assert client.release_calls == []
 
 
-def test_update_existing_runtime_release_wait_failure_returns_deploy_failed(monkeypatch):
+def test_update_existing_runtime_release_wait_failure_returns_deploy_failed(
+    monkeypatch,
+):
     runner = VeAgentkitRuntimeRunner()
     existing = _make_runtime(runtime_id="r-rf", status=RUNTIME_STATUS_READY)
     unreleased = _make_runtime(runtime_id="r-rf", status=RUNTIME_STATUS_UNRELEASED)
@@ -801,4 +885,6 @@ def test_update_existing_runtime_warns_and_ignores_network_and_clears_none_bindi
     assert ureq.tool_id == ""
     # runtime_network is ignored on update (network only applies to create),
     # so no NetworkConfiguration is sent as part of the update request.
-    assert not hasattr(ureq, "network_configuration") or ureq.network_configuration is None
+    assert (
+        not hasattr(ureq, "network_configuration") or ureq.network_configuration is None
+    )

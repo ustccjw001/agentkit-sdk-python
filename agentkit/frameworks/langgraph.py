@@ -37,6 +37,13 @@ from agentkit.frameworks._common import (
 )
 
 
+from agentkit.frameworks._agentsentry import (
+    guarded_config,
+    protect_migrated_tools,
+    restore_pending_tools,
+)
+
+
 LANGGRAPH_PENDING_INTERRUPT_STATE_KEY = "agentkit:langgraph:pending_interrupt"
 _OUTPUT_FIELD_KEYS = ("answer", "output", "final", "response", "text", "messages")
 
@@ -409,14 +416,17 @@ class LangGraphAgentkitBridge(BaseAgent):
         node = metadata.get("langgraph_node")
         return isinstance(node, str) and node in self._stream_nodes
 
+    @protect_migrated_tools
     async def _run_async_impl(
         self,
         ctx: InvocationContext,
     ) -> AsyncGenerator[Event, None]:
-        config = self._graph_config(ctx)
+        config = guarded_config(self._graph_config(ctx))
         resume_pending = self._pending_interrupt(ctx) is not None
         payload = self._run_payload(ctx)
         graph = await self._graph_for_run(config)
+        if resume_pending:
+            await restore_pending_tools(graph, config)
         accumulated_text = ""
         last_update: Any = None
         pending_update_text = ""

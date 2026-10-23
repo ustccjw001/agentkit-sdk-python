@@ -69,11 +69,28 @@ def deploy_command(
         "-y",
         help="Harness deploy: update an existing same-name harness without prompting.",
     ),
+    recreate_runtime: str = typer.Option(
+        "",
+        "--recreate-runtime",
+        help=(
+            "Whether to delete and recreate the Runtime when recovery needs "
+            "replacement (default: ask, No). Allowed: yes|no."
+        ),
+    ),
 ):
     """Deploy the Agent to target environment."""
     from agentkit.toolkit.executors import DeployExecutor
     from agentkit.toolkit.cli.console_reporter import ConsoleReporter
     from agentkit.toolkit.context import ExecutionContext
+    from agentkit.toolkit.runtime_recreate_policy import (
+        parse_runtime_recreate_policy,
+    )
+
+    try:
+        runtime_recreate_policy = parse_runtime_recreate_policy(recreate_runtime)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
 
     if harness is not None:
         _deploy_harness(
@@ -84,6 +101,7 @@ def deploy_command(
             discovery_url=discovery_url,
             allowed_id=allowed_id,
             assume_yes=yes,
+            runtime_recreate_policy=runtime_recreate_policy,
         )
         return
 
@@ -94,7 +112,10 @@ def deploy_command(
     ExecutionContext.set_reporter(reporter)
 
     executor = DeployExecutor(reporter=reporter)
-    result = executor.execute(config_file=str(config_file))
+    result = executor.execute(
+        config_file=str(config_file),
+        runtime_recreate_policy=runtime_recreate_policy,
+    )
 
     # Format output
     if result.success:
@@ -126,6 +147,7 @@ def _deploy_harness(
     discovery_url,
     allowed_id,
     assume_yes: bool = False,
+    runtime_recreate_policy="prompt",
 ):
     """Deploy a harness spec <name>.harness.json from the current directory."""
     import sys
@@ -161,6 +183,7 @@ def _deploy_harness(
             allowed_id=allowed_id,
             reporter=reporter,
             on_conflict=on_conflict,
+            runtime_recreate_policy=runtime_recreate_policy,
         )
     except HarnessDeployAborted:
         console.print("[yellow]Harness deploy cancelled.[/yellow]")

@@ -34,6 +34,12 @@ from agentkit.toolkit.config.dataclass_utils import AutoSerializableMixin
 from agentkit.toolkit.models import DeployResult, InvokeResult, StatusResult
 from agentkit.toolkit.reporter import Reporter
 from agentkit.toolkit.errors import ConfigError, ErrorCode
+from agentkit.toolkit.runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    runtime_gateway_replacement_reason,
+    runtime_recreate_preserved_message,
+    should_recreate_runtime,
+)
 from agentkit.utils.misc import (
     generate_runtime_name,
     generate_runtime_role_name,
@@ -98,6 +104,13 @@ class VeAgentkitRunnerConfig(AutoSerializableMixin):
     )
     runtime_envs: Dict[str, str] = field(
         default_factory=dict, metadata={"description": "Runtime environment variables"}
+    )
+    runtime_recreate_policy: RuntimeRecreatePolicy = field(
+        default="prompt",
+        metadata={
+            "system": True,
+            "description": "Runtime delete/recreate recovery policy",
+        },
     )
 
     # Runtime bindings (resource associations)
@@ -793,9 +806,43 @@ class VeAgentkitRuntimeRunner(Runner):
         ):
             return
         raise ConfigError(
-            "Runtime gateway_mode/gateway_instance_id cannot be changed after creation. "
-            "Delete and recreate the Runtime, or set runtime_id to Auto to create a new Runtime."
+            "Runtime gateway settings can only be changed by recreating the "
+            "Runtime. Pass --recreate-runtime yes to replace it, or set "
+            "runtime_id to Auto to create a separate Runtime."
         )
+
+    def _allow_runtime_recreate(
+        self, config: VeAgentkitRunnerConfig, reason: str
+    ) -> bool:
+        """Gate delete/recreate recovery for an existing Runtime."""
+        allowed = should_recreate_runtime(
+            config.runtime_recreate_policy,
+            runtime_id=config.runtime_id,
+            reason=reason,
+            reporter=self.reporter,
+        )
+        if not allowed:
+            self.reporter.warning(
+                runtime_recreate_preserved_message(config.runtime_id, reason)
+            )
+        return allowed
+
+    @staticmethod
+    def _runtime_replacement_reason(
+        config: VeAgentkitRunnerConfig,
+        current: Optional[runtime_types.GetRuntimeResponse],
+    ) -> Optional[str]:
+        if current is None:
+            return None
+        gateway_changed = runtime_gateway_binding_changed(
+            desired_mode=config.runtime_gateway_mode,
+            desired_instance_id=config.runtime_gateway_instance_id,
+            current_mode=getattr(current, "gateway_mode", None),
+            current_instance_id=getattr(current, "gateway_instance_id", None),
+        )
+        if gateway_changed:
+            return runtime_gateway_replacement_reason()
+        return None
 
     def _create_new_runtime(self, config: VeAgentkitRunnerConfig) -> DeployResult:
         """Create a new Runtime instance.
@@ -1242,7 +1289,25 @@ class VeAgentkitRuntimeRunner(Runner):
                     success=False, error=error_msg, error_code=ErrorCode.CONFIG_INVALID
                 )
 
-            self._assert_runtime_gateway_update_allowed(config, runtime)
+            replacement_reason = self._runtime_replacement_reason(config, runtime)
+            if replacement_reason:
+                if not self._allow_runtime_recreate(config, replacement_reason):
+                    raise ConfigError(
+                        runtime_recreate_preserved_message(
+                            config.runtime_id, replacement_reason
+                        )
+                    )
+
+                old_runtime_id = config.runtime_id
+                self.reporter.info(
+                    f"Deleting Runtime for replacement: {old_runtime_id}"
+                )
+                client.delete_runtime(
+                    runtime_types.DeleteRuntimeRequest(runtime_id=old_runtime_id)
+                )
+                self.reporter.info("Creating a replacement Runtime...")
+                config.runtime_id = AUTO_CREATE_VE
+                return self._create_new_runtime(config)
 
             # Check if update is needed
             # needs_update, update_reason = self._needs_runtime_update(runtime, config)

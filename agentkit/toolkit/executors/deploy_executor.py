@@ -30,6 +30,10 @@ Does NOT:
 from typing import Optional, Dict, Any
 from agentkit.toolkit.models import DeployResult, PreflightMode
 from agentkit.toolkit.reporter import Reporter
+from agentkit.toolkit.runtime_recreate_policy import (
+    RuntimeRecreatePolicy,
+    normalize_runtime_recreate_policy,
+)
 from .base_executor import BaseExecutor
 
 
@@ -62,6 +66,7 @@ class DeployExecutor(BaseExecutor):
         config_dict: Optional[Dict[str, Any]] = None,
         config_file: Optional[str] = None,
         preflight_mode: PreflightMode = PreflightMode.PROMPT,
+        runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
     ) -> DeployResult:
         """
         Execute deployment operation.
@@ -79,6 +84,7 @@ class DeployExecutor(BaseExecutor):
             config_dict: Configuration dictionary (highest priority)
             config_file: Path to configuration file
             preflight_mode: How to handle missing cloud services (default: PROMPT)
+            runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
         Returns:
             DeployResult: Deployment result from Strategy (no transformation applied)
@@ -90,6 +96,9 @@ class DeployExecutor(BaseExecutor):
         """
         token = None
         try:
+            runtime_recreate_policy = normalize_runtime_recreate_policy(
+                runtime_recreate_policy
+            )
             # Override preflight_mode from global config defaults if configured
             try:
                 from agentkit.toolkit.config.global_config import get_global_config
@@ -129,6 +138,7 @@ class DeployExecutor(BaseExecutor):
                     )
 
             strategy = self._get_strategy(launch_type, config_manager=config)
+            strategy.runtime_recreate_policy = runtime_recreate_policy
             strategy_config = self._get_strategy_config_object(config, launch_type)
 
             self.logger.info(f"Starting deployment with {launch_type} strategy...")

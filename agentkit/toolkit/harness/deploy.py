@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, Optional, Union
 
 from ..models import LifecycleResult
 from ..reporter import Reporter
+from ..runtime_recreate_policy import RuntimeRecreatePolicy
 from .config_builder import build_agentkit_config
 from .env_mapping import to_runtime_env
 
@@ -202,6 +203,7 @@ def deploy_harness(
     allowed_id: Optional[str] = None,
     reporter: Optional[Reporter] = None,
     on_conflict: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    runtime_recreate_policy: RuntimeRecreatePolicy = "prompt",
 ) -> LifecycleResult:
     """Deploy a harness spec as an AgentKit runtime (cloud build, no local Docker).
 
@@ -234,6 +236,7 @@ def deploy_harness(
         reporter: Progress reporter forwarded to the launch (default: silent).
         on_conflict: Callback consulted when a single same-name harness exists;
             returns True to update it, False to abort.
+        runtime_recreate_policy: Whether delete/recreate recovery is allowed.
 
     Returns:
         LifecycleResult: the build+deploy result from ``sdk.launch``.
@@ -379,6 +382,7 @@ def deploy_harness(
         result = launch(
             config_dict=cfg,
             preflight_mode=PreflightMode.WARN,
+            runtime_recreate_policy=runtime_recreate_policy,
             reporter=reporter,
         )
     finally:
