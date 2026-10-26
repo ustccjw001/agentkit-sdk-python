@@ -580,6 +580,10 @@ class AgentkitLangGraphServerApp(BaseAgentkitApp):
                 version="v2",
             ):
                 mode, data = _stream_chunk(chunk)
+                # 原生 Server 用 error 帧报告失败而不一定抛异常；不能将其吞掉并记为执行成功。
+                # 错误正文可能含模型或工具输入，只返回固定提示，诊断从执行记录回查。
+                if mode == "error":
+                    raise RuntimeError("LangGraph execution failed")
                 if mode == "messages" or mode.startswith("messages/"):
                     text = _stream_message_text(data)
                     delta = _chunk_delta(accumulated_text, text)
