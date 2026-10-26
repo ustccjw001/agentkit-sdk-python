@@ -35,6 +35,8 @@ def test_stream_http_parent_run_correlation_and_error_without_body(traces, faile
     class Probe:
         @trace_execution
         async def stream(self, req):
+            # 复现真实 LangGraph Server 内存客户端对活动 Span 名称的改写。
+            trace.get_current_span().update_name("POST /noauth/threads/{thread_id}/runs/stream")
             yield {"content": "private output"}
             if failed:
                 raise RuntimeError("private failure")

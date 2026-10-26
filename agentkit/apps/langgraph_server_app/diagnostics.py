@@ -49,5 +49,8 @@ def trace_execution(func):
             else:
                 # 这里只表示本次适配流结束，不代表业务 Task 或人工等待已经完成。
                 request_span.add_event("agent.execution.finished")
+            finally:
+                # 原生内存 HTTP 客户端会改写当前 Span 的 route 名；保留 SDK 执行阶段名用于耗时归类。
+                span.update_name("runtime.agent.execute")
 
     return wrapped
