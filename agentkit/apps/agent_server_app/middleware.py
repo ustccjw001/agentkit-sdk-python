@@ -18,6 +18,7 @@ from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from agentkit.apps.a2a_app.request_diagnostics import observe_a2a_request
 from agentkit.apps.agent_server_app.diagnostics import runtime_attributes
 from agentkit.apps.agent_server_app.telemetry import telemetry
 from agentkit.apps.auth.inbound import redact_inbound_auth_headers
@@ -81,7 +82,7 @@ class AgentkitTelemetryHTTPMiddleware:
                     )
 
         try:
-            await self.app(scope, receive, send_wrapper)
+            await self.app(scope, observe_a2a_request(scope, receive, span), send_wrapper)
         except Exception as e:
             telemetry.trace_agent_server_finish(path=path, func_result="", exception=e)
             raise

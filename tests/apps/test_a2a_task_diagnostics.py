@@ -63,6 +63,7 @@ def test_standard_harness_a2a_emits_real_saved_task_state(monkeypatch):
     from google.genai import types
     from starlette.testclient import TestClient
     from agentkit.apps.agent_server_app.agent_server_app import AgentkitAgentServerApp
+    from agentkit.apps.agent_server_app.telemetry import telemetry
 
     class Probe(BaseAgent):
         async def _run_async_impl(self, ctx):
@@ -73,18 +74,24 @@ def test_standard_harness_a2a_emits_real_saved_task_state(monkeypatch):
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     monkeypatch.setattr(trace, "get_tracer", lambda *args, **kwargs: provider.get_tracer("test.tasks"))
+    monkeypatch.setattr(telemetry, "tracer", provider.get_tracer("test.a2a.request"))
     try:
         server = AgentkitAgentServerApp(agent=Probe(name="a2a_task_probe"))
         with TestClient(server.app) as client:
             response = client.post("/", json={"jsonrpc": "2.0", "id": "request-1",
                 "method": "message/send", "params": {"message": {"kind": "message",
                 "messageId": "message-1", "role": "user", "parts": [{"kind": "text", "text": "probe"}]},
+                "metadata": {"agentkitDiagnosticRunId": "a2a-mounted-run"},
                 "configuration": {"blocking": True}}})
         assert response.status_code == 200
         result = response.json()["result"]
         assert result["kind"] == "task"
         saved = [s for s in exporter.get_finished_spans() if s.name == "a2a.task.save"]
         assert saved
+        roots = [s for s in exporter.get_finished_spans() if s.name == "agent_server_request"]
+        assert len(roots) == 1
+        assert roots[0].attributes["agentkit.run.id"] == "a2a-mounted-run"
+        assert all(s.context.trace_id == roots[0].context.trace_id for s in saved)
         assert all(s.attributes["agentkit.task.id"] == result["id"] for s in saved)
         assert any(e.attributes["agentkit.task.state"] == "completed" for s in saved for e in s.events)
     finally:

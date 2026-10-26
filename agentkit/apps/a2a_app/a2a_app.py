@@ -34,6 +34,7 @@ from starlette.requests import Request
 
 from agentkit.apps.a2a_app.telemetry import telemetry
 from agentkit.apps.a2a_app.task_diagnostics import observe_task_store
+from agentkit.apps.agent_server_app.middleware import AgentkitTelemetryHTTPMiddleware
 from agentkit.apps.base_app import BaseAgentkitApp
 
 logger = logging.getLogger(__name__)
@@ -207,6 +208,9 @@ class AgentkitA2aApp(BaseAgentkitApp):
                 agent_executor=self._agent_executor, task_store=observe_task_store(self._task_store)
             ),
         ).build()
+
+        # 独立 A2A 入口沿用标准请求观测，记录 Runtime 与可选 Run，不另建上报通道。
+        a2a_app.add_middleware(AgentkitTelemetryHTTPMiddleware)
 
         # Register routes in the same style
         self.add_ping_route(a2a_app)
