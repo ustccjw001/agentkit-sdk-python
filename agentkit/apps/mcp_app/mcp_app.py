@@ -40,8 +40,10 @@ class AgentkitMCPApp(BaseAgentkitApp):
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs) -> Any:
-                # with tracer.start_as_current_span("tool") as span:
-                with telemetry.tracer.start_as_current_span(name="tool") as span:
+                with telemetry.tracer.start_as_current_span(
+                    name="tool", record_exception=False
+                ) as span:
+                    # 异常由 trace_tool 统一记录，关闭上下文管理器的重复异常事件。
                     exception = None
                     # 工具失败时仍需上报原始异常；未产生返回值不能掩盖业务错误。
                     result = None
@@ -70,8 +72,10 @@ class AgentkitMCPApp(BaseAgentkitApp):
 
             @wraps(func)
             def sync_wrapper(*args, **kwargs) -> Any:
-                # with tracer.start_as_current_span("tool") as span:
-                with telemetry.tracer.start_as_current_span(name="tool") as span:
+                with telemetry.tracer.start_as_current_span(
+                    name="tool", record_exception=False
+                ) as span:
+                    # 异常由 trace_tool 统一记录，关闭上下文管理器的重复异常事件。
                     exception = None
                     # 工具失败时仍需上报原始异常；未产生返回值不能掩盖业务错误。
                     result = None
@@ -101,7 +105,10 @@ class AgentkitMCPApp(BaseAgentkitApp):
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs) -> Any:
-                with telemetry.tracer.start_as_current_span(name="tool") as span:
+                with telemetry.tracer.start_as_current_span(
+                    name="tool", record_exception=False
+                ) as span:
+                    # 异常由 trace_tool 统一记录，关闭上下文管理器的重复异常事件。
                     exception = None
                     # 工具失败时仍需上报原始异常；未产生返回值不能掩盖业务错误。
                     result = None
@@ -127,7 +134,10 @@ class AgentkitMCPApp(BaseAgentkitApp):
 
             @wraps(func)
             def sync_wrapper(*args, **kwargs) -> Any:
-                with telemetry.tracer.start_as_current_span(name="tool") as span:
+                with telemetry.tracer.start_as_current_span(
+                    name="tool", record_exception=False
+                ) as span:
+                    # 异常由 trace_tool 统一记录，关闭上下文管理器的重复异常事件。
                     exception = None
                     # 工具失败时仍需上报原始异常；未产生返回值不能掩盖业务错误。
                     result = None

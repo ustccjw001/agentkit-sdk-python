@@ -61,10 +61,12 @@ def test_real_mcp_failure_retains_original_error_and_latency(
         )
         assert "gen_ai.input" not in span.attributes
         assert "gen_ai.output" not in span.attributes
-        assert any(
-            event.attributes.get("exception.type") == "ValueError"
-            for event in span.events
-        )
+        errors = [
+            event for event in span.events
+            if event.attributes.get("exception.type") == "ValueError"
+        ]
+        # 一次失败只记录一个异常事件，不能把自动和手动重复记录误当成重试。
+        assert len(errors) == 1
         assert len(records) == 1
         duration, attributes = records[0]
         assert duration >= 0
