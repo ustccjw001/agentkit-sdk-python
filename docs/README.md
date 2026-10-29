@@ -2,6 +2,8 @@
 
 本目录包含 AgentKit SDK 和 CLI 的完整文档。
 
+专属网关插件的 SDK 调用示例见[专属网关插件](./gateway_plugins.md)。
+
 ## 本地开发
 
 ### 安装依赖
