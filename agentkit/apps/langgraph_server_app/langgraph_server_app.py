@@ -24,6 +24,7 @@ from agentkit.apps.langgraph_server_app.diagnostics import (
     LangGraphTelemetryMiddleware,
     trace_execution,
 )
+from agentkit.apps.langgraph_server_app.session_errors import session_not_found
 
 if TYPE_CHECKING:
     from agentkit.plugins.llm_shield import LLMShieldPlugin
@@ -670,7 +671,8 @@ class AgentkitLangGraphServerApp(BaseAgentkitApp):
             app_name = request.path_params["app_name"]
             user_id = request.path_params["user_id"]
             thread_id = _agentkit_thread_id(app_name, user_id, session_id)
-            response = await self._client.threads.get(thread_id)
+            with session_not_found():
+                response = await self._client.threads.get(thread_id)
             metadata = response.get("metadata", {}) if isinstance(response, dict) else {}
             return JSONResponse(_session_body(app_name, user_id, session_id, metadata))
 
@@ -717,7 +719,8 @@ class AgentkitLangGraphServerApp(BaseAgentkitApp):
                 request.path_params["user_id"],
                 request.path_params["session_id"],
             )
-            await self._client.threads.delete(thread_id)
+            with session_not_found():
+                await self._client.threads.delete(thread_id)
             return Response(status_code=204)
 
         async def update_session(request: Request) -> JSONResponse:
@@ -728,7 +731,8 @@ class AgentkitLangGraphServerApp(BaseAgentkitApp):
             state_delta = payload.get("stateDelta") or payload.get("state_delta")
             state = state_delta if isinstance(state_delta, dict) else {}
             thread_id = _agentkit_thread_id(app_name, user_id, session_id)
-            await self._client.threads.update(thread_id, metadata=state)
+            with session_not_found():
+                await self._client.threads.update(thread_id, metadata=state)
             return JSONResponse(_session_body(app_name, user_id, session_id, state))
 
         async def run_agent(request: Request) -> JSONResponse:
